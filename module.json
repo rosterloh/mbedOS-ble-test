@@ -1,0 +1,20 @@
+{
+  "name": "mbedos-ble-test",
+  "version": "0.0.0",
+  "description": "mbed ble project using new mbed tools",
+  "keywords": [],
+  "author": "Richard Osterloh <richard.osterloh@gmail.com>",
+  "homepage": "https://github.com/rosterloh/mbedOS-ble-test",
+  "licenses": [
+    {
+      "url": "https://spdx.org/licenses/Apache-2.0",
+      "type": "Apache-2.0"
+    }
+  ],
+  "dependencies": {
+    "mbed-classic": "~0.0.4",
+    "ble": "ARMmbed/ble#develop",
+    "ble-nrf51822": "ARMmbed/ble-nrf51822#develop"
+  },
+  "bin": "./source"
+}
