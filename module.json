@@ -1,6 +1,6 @@
 {
   "name": "mbedos-ble-test",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "mbed ble project using new mbed tools",
   "keywords": [],
   "author": "Richard Osterloh <richard.osterloh@gmail.com>",
@@ -12,9 +12,7 @@
     }
   ],
   "dependencies": {
-    "mbed-classic": "~0.0.4",
-    "ble": "ARMmbed/ble#develop",
-    "ble-nrf51822": "ARMmbed/ble-nrf51822#develop"
+    "ble": "^2.1.11"
   },
   "bin": "./source"
 }
