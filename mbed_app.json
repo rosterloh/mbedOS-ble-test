@@ -1,0 +1,9 @@
+{
+    "config": {
+        "trace": false
+    },
+    "target_overrides": {
+        "NRF52_DK": {
+        }
+    }
+}

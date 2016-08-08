@@ -1,13 +1,31 @@
-#include "mbed-drivers/mbed.h"
+#include <mbed_events.h>
+
+#include <mbed.h>
 #include "ble/BLE.h"
 #include "EddystoneService.h"
-#include "ble/services/DFUService.h"
+
+#include "PersistentStorageHelper/ConfigParamsPersistence.h"
 
 EddystoneService *eddyServicePtr;
-DFUService *dfuPtr;
 
 /* Duration after power-on that config service is available. */
 static const int CONFIG_ADVERTISEMENT_TIMEOUT_SECONDS = 30;
+
+/* Default UID frame data */
+static const UIDNamespaceID_t uidNamespaceID = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99};
+static const UIDInstanceID_t  uidInstanceID  = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+/* Default version in TLM frame */
+static const uint8_t tlmVersion = 0x00;
+
+/* Values for ADV packets related to firmware levels, calibrated based on measured values at 1m */
+static const PowerLevels_t defaultAdvPowerLevels = {-47, -33, -21, -13};
+/* Values for radio power levels, provided by manufacturer. */
+static const PowerLevels_t radioPowerLevels      = {-30, -16, -4, 4};
+
+static EventQueue eventQueue(
+    /* event count */ 16 * /* event size */ 32
+);
 
 DigitalOut led(LED1, 1);
 
@@ -28,9 +46,12 @@ static void timeout(void)
     Gap::GapState_t state;
     state = BLE::Instance().gap().getState();
     if (!state.connected) { /* don't switch if we're in a connected state. */
-        eddyServicePtr->startBeaconService(5, 5, 5);
+        eddyServicePtr->startBeaconService();
+        EddystoneService::EddystoneParams_t params;
+        eddyServicePtr->getEddystoneParams(params);
+        saveEddystoneServiceConfigParams(&params);
     } else {
-        minar::Scheduler::postCallback(timeout).delay(minar::milliseconds(CONFIG_ADVERTISEMENT_TIMEOUT_SECONDS * 1000));
+        eventQueue.call_in(CONFIG_ADVERTISEMENT_TIMEOUT_SECONDS * 1000, timeout);
     }
 }
 
@@ -45,6 +66,18 @@ static void onBleInitError(BLE::InitializationCompleteCallbackContext* initConte
     (void) initContext;
 }
 
+static void initializeEddystoneToDefaults(BLE &ble)
+{
+    /* Set everything to defaults */
+    eddyServicePtr = new EddystoneService(ble, defaultAdvPowerLevels, radioPowerLevels, eventQueue);
+
+    /* Set default URL, UID and TLM frame data if not initialized through the config service */
+    const char* url = YOTTA_CFG_EDDYSTONE_DEFAULT_URL;
+    eddyServicePtr->setURLData(url);
+    eddyServicePtr->setUIDData(uidNamespaceID, uidInstanceID);
+    eddyServicePtr->setTLMData(tlmVersion);
+}
+
 static void bleInitComplete(BLE::InitializationCompleteCallbackContext* initContext)
 {
     BLE         &ble  = initContext->ble;
@@ -57,40 +90,40 @@ static void bleInitComplete(BLE::InitializationCompleteCallbackContext* initCont
 
     ble.gap().onDisconnection(disconnectionCallback);
 
-    dfuPtr = new DFUService(ble);
-
-    /* Set UID and TLM frame data */
-    const UIDNamespaceID_t uidNamespaceID = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99};
-    const UIDInstanceID_t  uidInstanceID  = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
-    uint8_t tlmVersion = 0x00;
-
-    /* Initialize a EddystoneBeaconConfig service providing config params, default URI, and power levels. */
-    static const PowerLevels_t defaultAdvPowerLevels = {-47, -33, -21, -13}; // Values for ADV packets related to firmware levels, calibrated based on measured values at 1m
-    static const PowerLevels_t radioPowerLevels      = {-30, -16, -4, 4};    // Values for radio power levels, provided by manufacturer.
-
-    /* Set everything to defaults */
-    eddyServicePtr = new EddystoneService(ble, defaultAdvPowerLevels, radioPowerLevels, 500);
-
-    /* Set default URL, UID and TLM frame data if not initialized through the config service */
-    eddyServicePtr->setURLData("http://mbed.org");
-    eddyServicePtr->setUIDData(&uidNamespaceID, &uidInstanceID);
-    eddyServicePtr->setTLMData(tlmVersion);
+    EddystoneService::EddystoneParams_t params;
+    if (loadEddystoneServiceConfigParams(&params)) {
+        eddyServicePtr = new EddystoneService(ble, params, radioPowerLevels, eventQueue);
+    } else {
+        initializeEddystoneToDefaults(ble);
+    }
 
     /* Start Eddystone in config mode */
-    eddyServicePtr->startConfigService();
+   eddyServicePtr->startConfigService();
 
-    minar::Scheduler::postCallback(timeout).delay(minar::milliseconds(CONFIG_ADVERTISEMENT_TIMEOUT_SECONDS * 1000));
+   eventQueue.call_in(CONFIG_ADVERTISEMENT_TIMEOUT_SECONDS * 1000, timeout);
 }
 
-void app_start(int, char *[])
+void scheduleBleEventsProcessing(BLE::OnEventsToProcessCallbackContext* context) {
+    BLE &ble = BLE::Instance();
+    eventQueue.call(Callback<void()>(&ble, &BLE::processEvents));
+}
+
+
+int main()
 {
     /* Tell standard C library to not allocate large buffers for these streams */
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
     setbuf(stdin, NULL);
 
-    minar::Scheduler::postCallback(blinky).period(minar::milliseconds(500));
+    eventQueue.call_every(500, blinky);
 
     BLE &ble = BLE::Instance();
+    ble.onEventsToProcess(scheduleBleEventsProcessing);
     ble.init(bleInitComplete);
+
+    while (true) {
+        eventQueue.dispatch();
+    }
+    return 0;
 }
